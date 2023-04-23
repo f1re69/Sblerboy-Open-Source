@@ -10,6 +10,10 @@ import time
 import sys
 import configparser
 import ast
+import pyvirtualcam
+from PIL import Image
+import numpy as np
+
 
 EMOTE_LIST = None
 ID_CHANNEL = 0
@@ -34,6 +38,7 @@ bot = commands.Bot(command_prefix='%',
                    description='Emulating...', intents=intents)
 
 # Launch Pyboy
+# pyboy = PyBoy('rom/rom.gb')
 pyboy = PyBoy('rom/rom.gb', window_type="headless")
 try:
     save_file = open("rom/save_file.state", "rb")
@@ -55,16 +60,58 @@ ID_CHAT_CHANNEL = int(config['DEFAULT']['ID_CHAT_CHANNEL'])
 EMOTE_LIST = ast.literal_eval(config['DEFAULT']['EMOTE_LIST'])
 BOT_TOKEN = config['DEFAULT']['BOT_TOKEN']
 
+# lcd_lock = threading.Lock()
+fps = FRAME_PER_SECONDS
+size = (320, 288) 
+# screen_object = pyboy.botsupport_manager().screen()
+
+
+async def log_action(emoji, user):
+    global logs_channel
+    await asyncio.sleep(0.5)
+    # with lcd_lock:
+    screen_object = pyboy.botsupport_manager().screen()
+    new_image = screen_object.screen_image()
+    new_image = new_image.resize((320, 288))
+
+    embed = discord.Embed(title="Action enregistrée",
+                          description="", color=0xeeb840)
+    if ":" in emoji:
+        embed.add_field(name="Informations sur le joueur: ", value="Le joueur <@" +
+                        str(user.id)+"> a réagi avec <:" + emoji + ">.", inline=False)
+    else:
+        embed.add_field(name="Informations sur le joueur: ", value="Le joueur <@" +
+                        str(user.id)+"> a réagi avec " + emoji + ".", inline=False)
+    embed.set_image(url="attachment://image.png")
+    embed.set_thumbnail(url=user.avatar)
+
+    with io.BytesIO() as image_binary:
+        new_image.save(image_binary, 'PNG')
+        image_binary.seek(0)
+        log_message = await logs_channel.send(embed=embed, file=discord.File(fp=image_binary, filename='image.png'))
+        return log_message.embeds[0].image.url
+
 
 def tick_thread():
     global input_wanted
     old_input = input_wanted
     old_time = int(round(time.time() * 1000))
-    while True:
-        if old_input != input_wanted:
-            pyboy.send_input(input_wanted)
-            old_input = input_wanted
-        old_time = tick_pyboy(old_time)
+    with pyvirtualcam.Camera(width=size[0], height=size[1], fps=fps, print_fps=True) as cam:
+        while True:
+            if old_input != input_wanted:
+                pyboy.send_input(input_wanted)
+                old_input = input_wanted
+            old_time = tick_pyboy(old_time)
+
+            screen_object = pyboy.botsupport_manager().screen()
+            new_image = screen_object.screen_image()
+            new_image = new_image.resize((320, 288))
+            new_image_array = np.array(new_image)
+            
+            # Envoyez l'image à la webcam virtuelle
+            cam.send(new_image_array)
+            # Attendez le prochain frame
+            cam.sleep_until_next_frame()
 
 
 def tick_pyboy(old_time):
@@ -123,7 +170,8 @@ async def on_ready():
     if main_guild != 0:
         main_channel = await get_channel(ID_CHANNEL)
     if main_channel != 0:
-        await get_or_send_message(main_channel)
+        # await get_or_send_message(main_channel)
+        await send_stream_link_and_reactions(main_channel)  # Nouvelle fonction pour envoyer le lien et les réactions
     if main_guild != 0:
         logs_channel = await get_channel(ID_LOG_CHANNEL)
         print('Init complete')
@@ -252,7 +300,7 @@ async def right(multiplier):
 async def proceed(ctx, emoji, user):
     await commit()
     image = await log_action(emoji, user)
-    await send_new_screen(image, emoji, user, False)
+    # await send_new_screen(image, emoji, user, False) # La fonction send_new_screen n'est plus utilisée
 
 
 async def commit():
@@ -285,30 +333,17 @@ async def send_new_screen(image, emoji, user, is_first):
         cache_msg = await main_channel.fetch_message(main_message.id)
         await main_message.remove_reaction(emoji, user)
 
+async def send_stream_link_and_reactions(channel):
+    global main_message
+    # Remplacez cette URL par l'URL de votre stream YouTube
+    stream_link = ""
+    main_message = await channel.send(stream_link)  # Envoyer le lien du stream sans l'embed
+    embed = discord.Embed(title="Pokémon Rouge", description="Réagissez avec les émoticônes ci-dessous pour contrôler le jeu.", color=0xeeb840)
+    reactions_message = await channel.send(embed=embed)  # Envoyer un message séparé pour les réactions
+    for emote in EMOTE_LIST:
+        await reactions_message.add_reaction(emote)
+    main_message = reactions_message  # Conserver le message des réactions pour la gestion des réactions
 
-async def log_action(emoji, user):
-    global logs_channel
-    await asyncio.sleep(0.5)
-    screen_object = pyboy.botsupport_manager().screen()
-    new_image = screen_object.screen_image()
-    new_image = new_image.resize((320, 288))
-
-    embed = discord.Embed(title="Action enregistrée",
-                          description="", color=0xeeb840)
-    if ":" in emoji:
-        embed.add_field(name="Informations sur le joueur: ", value="Le joueur <@" +
-                        str(user.id)+"> a réagi avec <:" + emoji + ">.", inline=False)
-    else:
-        embed.add_field(name="Informations sur le joueur: ", value="Le joueur <@" +
-                        str(user.id)+"> a réagi avec " + emoji + ".", inline=False)
-    embed.set_image(url="attachment://image.png")
-    embed.set_thumbnail(url=user.avatar)
-
-    with io.BytesIO() as image_binary:
-        new_image.save(image_binary, 'PNG')
-        image_binary.seek(0)
-        log_message = await logs_channel.send(embed=embed, file=discord.File(fp=image_binary, filename='image.png'))
-        return log_message.embeds[0].image.url
 
 
 bot.run(BOT_TOKEN)
