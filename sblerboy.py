@@ -242,6 +242,7 @@ async def process_reaction(ctx, emoji, user):
             await select()
         await proceed(ctx, full_emoji_name, user)
         await main_message.clear_reaction("\U00002705")
+        await main_message.remove_reaction(emoji, user)
         has_reacted = False
 
 
@@ -331,7 +332,6 @@ async def send_new_screen(image, emoji, user, is_first):
         embed.set_image(url=image)
         await main_message.edit(embed=embed)
         cache_msg = await main_channel.fetch_message(main_message.id)
-        await main_message.remove_reaction(emoji, user)
 
 async def send_stream_link_and_reactions(channel):
     global main_message
